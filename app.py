@@ -150,6 +150,63 @@ if selected_project:
     st.subheader(f"Bestehende Mängel für Projekt: {selected_project}")
     st.dataframe(df)
 
+#####
+#####
+#####
+#####
+#####
+
+import streamlit as st
+from PIL import Image, ImageDraw
+import os
+from streamlit_drawable_canvas import st_canvas
+
+# Bild "plan.jpg" laden
+image_path = "plan.jpg"
+if os.path.exists(image_path):
+    # Lade das Originalbild
+    image = Image.open(image_path)
+
+    # Stiftbreite auswählen
+    stroke_width = st.slider("Stiftbreite auswählen", 1, 25, 3)
+
+    # Stiftfarbe auswählen
+    stroke_color = st.color_picker("Stiftfarbe auswählen", "#000000")
+
+    # Zeichenfläche (Canvas) erstellen, auf der gezeichnet werden kann
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 165, 0, 0.3)",  # Füllfarbe
+        stroke_width=stroke_width,            # Benutzerdefinierte Strichbreite
+        stroke_color=stroke_color,            # Benutzerdefinierte Strichfarbe
+        background_image=image,               # Hintergrundbild
+        update_streamlit=True,
+        height=image.height,
+        width=image.width,
+        drawing_mode="freedraw",              # Zeichenmodus (freies Zeichnen)
+        key="canvas",
+    )
+
+    # Bearbeitetes Bild speichern mit dem Originalbild
+    if st.button("Bild speichern"):
+        # Lade die Zeichnung als PIL-Bild
+        drawing = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
+
+        # Kombiniere das Originalbild mit der Zeichnung
+        combined_image = Image.alpha_composite(image.convert("RGBA"), drawing)
+
+        # Bestimme den nächsten verfügbaren Dateinamen
+        i = 1
+        while os.path.exists(f"plan({i}).jpg"):
+            i += 1
+        save_path = f"plan({i}).jpg"
+
+        # Speichere das kombinierte Bild
+        combined_image = combined_image.convert("RGB")  # Konvertiere zu RGB für JPEG
+        combined_image.save(save_path, format="JPEG")
+
+        st.success(f"Bild wurde gespeichert als {save_path}")
+else:
+    st.error(f"Das Bild {image_path} wurde nicht gefunden.")
 
 
 
@@ -158,6 +215,52 @@ if selected_project:
 #####
 #####
 #####
+
+
+# import streamlit as st
+# from PIL import Image
+# import io
+# from streamlit_drawable_canvas import st_canvas
+#
+# # Bild hochladen
+# uploaded_file = st.file_uploader("Lade ein Bild hoch", type=["png", "jpg", "jpeg"])
+#
+# if uploaded_file is not None:
+#     # Bild anzeigen
+#     image = Image.open(uploaded_file)
+#     st.image(image, caption="Originales Bild", use_column_width=True)
+#
+#     # Zeichenfläche (Canvas) erstellen
+#     canvas_result = st_canvas(
+#         fill_color="rgba(255, 165, 0, 0.3)",  # Füllfarbe
+#         stroke_width=3,                       # Strichbreite
+#         stroke_color="#000000",               # Strichfarbe
+#         background_image=image,               # Hintergrundbild
+#         update_streamlit=True,
+#         height=image.height,
+#         width=image.width,
+#         drawing_mode="freedraw",              # Zeichenmodus (freies Zeichnen)
+#         key="canvas",
+#     )
+#
+#     # Bearbeitetes Bild anzeigen
+#     if canvas_result.image_data is not None:
+#         st.image(canvas_result.image_data, caption="Bearbeitetes Bild", use_column_width=True)
+#
+#     # Bearbeitetes Bild speichern
+#     if st.button("Bild speichern"):
+#         img_pil = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
+#         buffered = io.BytesIO()
+#         img_pil.save(buffered, format="PNG")
+#         st.download_button(
+#             label="Download bearbeitetes Bild",
+#             data=buffered,
+#             file_name="bearbeitetes_bild.png",
+#             mime="image/png"
+#         )
+
+
+
 
 #alter Code ohne Projekterstellung und Projektauswahlmöglichkeiten
 
