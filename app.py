@@ -1,3 +1,4 @@
+import dropbox
 import pandas as pd
 from datetime import datetime
 import time
@@ -6,86 +7,109 @@ from PIL import Image, ImageDraw
 import os
 from streamlit_drawable_canvas import st_canvas
 
-# Base directory for projects
+# Base directory for projects (optional, local usage)
 PROJECTS_DIR = "Projekte"
 
-# Function to create a new project
+ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
+
+
+def authenticate_dropbox():
+    dbx = dropbox.Dropbox(ACCESS_TOKEN)
+    return dbx
+
+
+# Function to create a new project (folder) in Dropbox
 def create_new_project(project_name):
-    project_path = os.path.join(PROJECTS_DIR, project_name)
+    dbx = authenticate_dropbox()
+    folder_path = f"/{project_name}"
 
-    if not os.path.exists(project_path):
-        os.makedirs(project_path)
-        os.makedirs(os.path.join(project_path, "Fotos"))
-        os.makedirs(os.path.join(project_path, "Pläne"))  # Create folder for plans
+    try:
+        dbx.files_create_folder_v2(folder_path)
+        dbx.files_create_folder_v2(f"{folder_path}/Fotos")
+        dbx.files_create_folder_v2(f"{folder_path}/Pläne")
 
-        csv_path = os.path.join(project_path, "mangelmanagement.csv")
-        pd.DataFrame(columns=[
+        # Create an empty CSV file in Dropbox
+        csv_path = f"{folder_path}/mangelmanagement.csv"
+        df = pd.DataFrame(columns=[
             "ID", "Erfassungsdatum", "Unternehmer", "Gewerk", "Mangelname",
             "Mangelbeschreibung", "Wohnung", "Zimmer", "Ort", "Fotos", "Plan", "Bemerkung", "Zu erledigen bis"
-        ]).to_csv(csv_path, index=False)
+        ])
+        df.to_csv("temp_mangelmanagement.csv", index=False)
+        with open("temp_mangelmanagement.csv", "rb") as f:
+            dbx.files_upload(f.read(), csv_path)
+        os.remove("temp_mangelmanagement.csv")  # Cleanup local temporary file
 
         st.success(f"Neues Projekt '{project_name}' wurde erstellt!")
         time.sleep(1)
         st.rerun()
-    else:
-        st.warning(f"Projekt '{project_name}' existiert bereits!")
+    except dropbox.exceptions.ApiError as e:
+        st.error(f"Fehler beim Erstellen des Projekts: {e}")
 
-# Load or create project CSV file
+
+# Load project CSV file from Dropbox
 def load_project_data(project_name):
-    csv_path = os.path.join(PROJECTS_DIR, project_name, "mangelmanagement.csv")
-    if os.path.exists(csv_path):
-        return pd.read_csv(csv_path), csv_path
-    else:
+    csv_path = f"/{project_name}/mangelmanagement.csv"
+    dbx = authenticate_dropbox()
+
+    try:
+        metadata, response = dbx.files_download(csv_path)
+        df = pd.read_csv(response.content)
+        return df, csv_path
+    except dropbox.exceptions.ApiError:
         return pd.DataFrame(columns=[
             "ID", "Erfassungsdatum", "Unternehmer", "Gewerk", "Mangelname",
             "Mangelbeschreibung", "Wohnung", "Zimmer", "Ort", "Fotos", "Plan", "Bemerkung", "Zu erledigen bis"
         ]), csv_path
 
-# Function to generate a new ID
-def generate_new_id(df):
-    if df.empty:
-        return 1000
-    else:
-        max_id = df["ID"].max()
-        return max_id + 1
 
-# Function to save photos with the right filenames and return the filenames
+# Function to save photos to Dropbox
 def save_photos(images, id_, date, company, apartment, room, project_name):
     photo_filenames = []
-    photo_dir = os.path.join(PROJECTS_DIR, project_name, "Fotos")
+    photo_dir = f"/{project_name}/Fotos"
+    dbx = authenticate_dropbox()
+
     for idx, image in enumerate(images):
         filename = f"{id_}-{date}-{company}-{apartment}-{room}-{idx + 1}.jpg"
-        file_path = os.path.join(photo_dir, filename)
-        image.save(file_path)
+        # Save the image to a temporary location first
+        image.save(filename)
+        with open(filename, "rb") as f:
+            dbx.files_upload(f.read(), f"{photo_dir}/{filename}")
         photo_filenames.append(filename)
+        os.remove(filename)  # Cleanup local file
     return photo_filenames
 
-# Function to save the plan image with annotations
-def save_plan_image(image, canvas_result, id_, project_name):
-    photo_dir = os.path.join(PROJECTS_DIR, project_name, "Fotos")
-    if not os.path.exists(photo_dir):
-        os.makedirs(photo_dir)
 
+# Function to save the plan image to Dropbox
+def save_plan_image(image, canvas_result, id_, project_name):
+    photo_dir = f"/{project_name}/Fotos"
     drawing = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
     drawing = drawing.resize(image.size)
     combined_image = Image.alpha_composite(image.convert("RGBA"), drawing)
     plan_filename = f"{id_}-Plan.jpg"
-    photo_path = os.path.join(photo_dir, plan_filename)
-    combined_image.convert("RGB").save(photo_path, format="JPEG")
+    combined_image.convert("RGB").save(plan_filename, format="JPEG")
 
+    dbx = authenticate_dropbox()
+    with open(plan_filename, "rb") as f:
+        dbx.files_upload(f.read(), f"{photo_dir}/{plan_filename}")
+
+    os.remove(plan_filename)  # Cleanup local file
     return plan_filename
+
 
 # Function to add a new record
 def add_record(data, csv_path):
     df = pd.read_csv(csv_path)
     new_df = pd.DataFrame([data])
     df = pd.concat([df, new_df], ignore_index=True)
-    df.to_csv(csv_path, index=False)
+
+    # Save updated DataFrame back to Dropbox
+    df.to_csv("temp_mangelmanagement.csv", index=False)
+    dbx = authenticate_dropbox()
+    with open("temp_mangelmanagement.csv", "rb") as f:
+        dbx.files_upload(f.read(), csv_path, mode=dropbox.files.WriteMode("overwrite"))
+    os.remove("temp_mangelmanagement.csv")  # Cleanup local temporary file
     return df
 
-# Ensure base projects directory exists
-if not os.path.exists(PROJECTS_DIR):
-    os.makedirs(PROJECTS_DIR)
 
 # Streamlit app
 st.title("Bau- und Wohnungsabnahmen")
@@ -102,7 +126,7 @@ with st.sidebar:
         if create_project_button and new_project_name:
             create_new_project(new_project_name)
 
-    projects = [p for p in os.listdir(PROJECTS_DIR) if os.path.isdir(os.path.join(PROJECTS_DIR, p))]
+    projects = [p.name for p in dbx.files_list_folder("").entries if isinstance(p, dropbox.files.FolderMetadata)]
     selected_project = st.selectbox("Projekt auswählen", options=projects)
 
     if selected_project:
@@ -110,13 +134,12 @@ with st.sidebar:
         uploaded_plan = st.file_uploader("Plan hochladen", type=["jpg", "jpeg", "png"])
 
         if uploaded_plan:
-            plan_dir = os.path.join(PROJECTS_DIR, selected_project, "Pläne")
-            if not os.path.exists(plan_dir):
-                os.makedirs(plan_dir)
-
-            plan_path = os.path.join(plan_dir, uploaded_plan.name)
-            with open(plan_path, "wb") as f:
+            plan_dir = f"/{selected_project}/Pläne"
+            with open(uploaded_plan.name, "wb") as f:
                 f.write(uploaded_plan.getbuffer())
+            with open(uploaded_plan.name, "rb") as f:
+                dbx.files_upload(f.read(), f"{plan_dir}/{uploaded_plan.name}")
+            os.remove(uploaded_plan.name)  # Cleanup local file
             st.success(f"Plan '{uploaded_plan.name}' erfolgreich hochgeladen!")
 
 # Load the selected project data
@@ -125,31 +148,33 @@ if selected_project:
 
     st.header(f"Projekt / Abnahme: {selected_project}")
 
-    # Liste der verfügbaren Pläne anzeigen
-    plan_dir = os.path.join(PROJECTS_DIR, selected_project, "Pläne")
-    available_plans = os.listdir(plan_dir) if os.path.exists(plan_dir) else []
-    selected_plan = st.selectbox("Plan auswählen für Markierungen", options=available_plans)
+    # List available plans from Dropbox
+    plan_dir = f"/{selected_project}/Pläne"
+    available_plans = [p.name for p in dbx.files_list_folder(plan_dir).entries if
+                       isinstance(p, dropbox.files.FileMetadata)]
+    selected_plan = st.selectbox("Plan auswählen für Markierungen", options=available_plans, index=0,
+                                 key="selected_plan")
 
-    # Bild Plan laden und Zeichnen
+    # Load selected plan image and draw
     if selected_plan:
-        plan_path = os.path.join(plan_dir, selected_plan)
-        if os.path.exists(plan_path):
-            image = Image.open(plan_path)
+        plan_path = f"{plan_dir}/{selected_plan}"
+        metadata, response = dbx.files_download(plan_path)
+        image = Image.open(response.content)
 
-            stroke_width = st.slider("Stiftbreite auswählen", 1, 25, 3)
-            stroke_color = st.color_picker("Stiftfarbe auswählen", "#000000")
+        stroke_width = st.slider("Stiftbreite auswählen", 1, 25, 3)
+        stroke_color = st.color_picker("Stiftfarbe auswählen", "#000000")
 
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 165, 0, 0.3)",
-                stroke_width=stroke_width,
-                stroke_color=stroke_color,
-                background_image=image,
-                update_streamlit=True,
-                height=image.height,
-                width=image.width,
-                drawing_mode="freedraw",
-                key="canvas",
-            )
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 165, 0, 0.3)",
+            stroke_width=stroke_width,
+            stroke_color=stroke_color,
+            background_image=image,
+            update_streamlit=True,
+            height=image.height,
+            width=image.width,
+            drawing_mode="freedraw",
+            key="canvas",
+        )
 
     # Create a container for the form
     with st.form(key='mangel_form', clear_on_submit=True):
@@ -178,9 +203,10 @@ if selected_project:
         submit_button = st.form_submit_button("Absenden")
 
         if submit_button:
-            # Speichere alle Fotos, die aufgenommen wurden
+            # Save all photos taken
             if len(photos) > 0:
-                photo_filenames = save_photos(photos, id_, erfassungsdatum.strftime("%Y-%m-%d"), unternehmer, apartment, room, selected_project)
+                photo_filenames = save_photos(photos, id_, erfassungsdatum.strftime("%Y-%m-%d"), unternehmer, apartment,
+                                              room, selected_project)
             else:
                 photo_filenames = []
 
@@ -206,6 +232,9 @@ if selected_project:
 
             df = add_record(data, csv_path)
             st.success(f"Mangel erfolgreich hinzugefügt! ID: {id_}")
+
+            # Reset selected plan
+            st.session_state.selected_plan = None
 
             # Rerun the page to immediately reflect the change in the table
             st.rerun()
