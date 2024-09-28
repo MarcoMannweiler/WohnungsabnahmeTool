@@ -19,7 +19,7 @@ def authenticate_dropbox():
 
 # Create a global Dropbox instance
 dbx = authenticate_dropbox()
-st.write("Verfügbare Secrets:", st.secrets)
+
 # Function to generate a new ID
 def generate_new_id(df):
     if df.empty:
