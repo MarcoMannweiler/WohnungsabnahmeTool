@@ -8,8 +8,10 @@ import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 
-# Access token from environment variable
-ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
+if "DROPBOX_ACCESS_TOKEN" in os.environ:
+    ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
+else:
+    ACCESS_TOKEN = st.secrets["dropbox"]["ACCESS_TOKEN"]
 
 # Authenticate and create a Dropbox instance
 def authenticate_dropbox():
